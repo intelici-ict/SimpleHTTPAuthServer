@@ -49,31 +49,36 @@ class SimpleHTTPAuthHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         ''' Present frontpage with user authentication. '''
-        if self.headers.getheader('Authorization') is None:
+        if self.headers.get('Authorization') is None:
             self.do_authhead()
-            self.wfile.write('no auth header received')
-        elif self.headers.getheader('Authorization') == 'Basic '+ self.KEY:
+            self.wfile.write(b'no auth header received')
+        elif self.headers.get('Authorization') == 'Basic '+ self.KEY:
             SimpleHTTPRequestHandler.do_GET(self)
         else:
             self.do_authhead()
-            self.wfile.write(self.headers.getheader('Authorization'))
-            self.wfile.write('not authenticated')
+            self.wfile.write(self.headers.get('Authorization').encode())
+            self.wfile.write(b'not authenticated')
 
 def serve_https(https_port=80, https=True, start_dir=None, handler_class=SimpleHTTPAuthHandler):
     ''' setting up server '''
-    httpd = TCPServer(("", https_port), handler_class)
-
-    if https:
-        httpd.socket = ssl.wrap_socket(httpd.socket, keyfile=KEY_FILE,
-                                       certfile=CERT_FILE, server_side=True)
-
     if start_dir:
         print("Changing dir to {cd}".format(cd=start_dir))
         os.chdir(start_dir)
 
-    socket_addr = httpd.socket.getsockname()
-    print("Serving HTTP on", socket_addr[0], "port", socket_addr[1], "...")
-    httpd.serve_forever()
+    with TCPServer(("", https_port), handler_class) as httpd:
+        httpd.allow_reuse_address = True  # allow reuse of the same port after server was closed
+        if https:
+            httpd.socket = ssl.wrap_socket(httpd.socket, keyfile=KEY_FILE,
+                                           certfile=CERT_FILE, server_side=True)
+        socket_addr = httpd.socket.getsockname()
+        print("Serving HTTP on", socket_addr[0], "port", socket_addr[1], "...")
+
+        try:
+            httpd.serve_forever()
+        except (KeyboardInterrupt, Exception) as exc:
+            httpd.server_close()
+            print("Exiting")
+        
 
 def main():
     ''' Parsing inputs '''
@@ -92,7 +97,7 @@ def main():
             print("", file=sys.stderr)
             sys.exit(1)
 
-    SimpleHTTPAuthHandler.KEY = base64.b64encode(args.key)
+    SimpleHTTPAuthHandler.KEY = base64.b64encode(args.key.encode()).decode()
 
     serve_https(int(args.port), https=args.https,
                 start_dir=args.dir, handler_class=SimpleHTTPAuthHandler)
